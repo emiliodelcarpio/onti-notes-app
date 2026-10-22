@@ -1,69 +1,76 @@
-import Image from "next/image";
+import { redirect } from 'next/navigation'
+import Link from 'next/link'
+import AccountMenu from '@/components/account/AccountMenu'
+import RetryButton from '@/components/dashboard/RetryButton'
+import NotesWorkspace from '@/components/notes/NotesWorkspace'
+import FeedbackMessage from '@/components/ui/FeedbackMessage'
+import Icon from '@/components/ui/Icon'
+import { getAccountData } from '@/lib/account'
+import type { Note } from '@/types/notes'
+import type { Profile } from '@/types/profile'
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+export default async function Home({ searchParams }: {
+  searchParams: Promise<{ code?: string | string[]; sb_flow_id?: string | string[]; error?: string | string[]; error_code?: string | string[] }>
+}) {
+  const params = await searchParams
+  if (params.error || params.error_code) redirect('/auth/error')
+  if (typeof params.code === 'string' && params.code) {
+    // Preserve older email links. The Route Handler exchanges and saves the session.
+    const query = new URLSearchParams({ code: params.code })
+    if (typeof params.sb_flow_id === 'string') query.set('sb_flow_id', params.sb_flow_id)
+    redirect(`/auth/confirm?${query.toString()}`)
+  }
+
+  const account = await getAccountData()
+  if (!account) redirect('/login')
+  const { supabase, user } = account
+  // A missing profile is reported below; never create one outside the SQL trigger.
+  const profile: Profile = account.profile ?? {
+    id: user.id, full_name: null, avatar_url: null, theme_preference: 'system',
+  }
+  const firstName = profile.full_name?.trim().split(/\s+/)[0]
+  const profileErrorMessage = account.profileError === 'missing'
+    ? 'Tu perfil todavía no está disponible. No pudimos recuperar tus preferencias guardadas.'
+    : account.profileError === 'invalid_theme'
+      ? 'No pudimos recuperar tu apariencia guardada. Vuelve a elegirla en el menú de cuenta.'
+      : 'No pudimos cargar tu perfil. Algunas preferencias pueden mostrarse con sus valores iniciales.'
+  const notes: Note[] = []
+  let loadError: string | undefined
+  try {
+    // Read all pages rather than silently truncating at the API's default row limit.
+    const pageSize = 1000
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabase.from('notes')
+        .select('id, user_id, title, content, type, priority, status, color, remind_at, created_at, updated_at')
+        .eq('user_id', user.id).order('created_at', { ascending: false }).order('id', { ascending: false })
+        .range(offset, offset + pageSize - 1)
+      if (error || !data) throw new Error('notes_unavailable')
+      notes.push(...data)
+      if (data.length < pageSize) break
+    }
+  } catch {
+    notes.length = 0
+    loadError = 'Revisa tu conexión y vuelve a intentarlo. Tus notas guardadas no se han modificado.'
+  }
+
+  return <main className="min-h-dvh px-3 py-3 sm:px-6 sm:py-6 lg:px-8">
+    <div className="mx-auto min-h-[calc(100dvh-1.5rem)] max-w-[1480px] rounded-3xl border border-border bg-surface px-4 py-5 shadow-(--card-shadow) sm:min-h-[calc(100dvh-3rem)] sm:px-8 sm:py-6 lg:px-9">
+      <header className="flex items-center justify-between gap-4">
+        <Link href="/" aria-label="onti, inicio" className="inline-flex items-center gap-3 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent">
+          <span className="flex size-11 items-center justify-center rounded-xl bg-linear-to-br from-primary-from to-primary-to text-on-accent shadow-(--primary-shadow) sm:size-12"><Icon name="notebook" className="size-7" /></span>
+          <span className="text-3xl font-semibold tracking-tight">onti</span>
+        </Link>
+        <AccountMenu profile={profile} email={user.email ?? ''} />
+      </header>
+      <div className="mt-10 sm:mt-12">
+        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl lg:text-[42px]">{firstName ? `Hola, ${firstName}` : 'Hola, este es tu espacio'}</h1>
+        <p className="mt-2 max-w-3xl text-base leading-7 text-muted sm:text-lg">Tu espacio para organizar tus ideas y no olvidar lo importante.</p>
+      </div>
+      {account.profileError && <div className="mt-5 flex flex-wrap items-center gap-3">
+        <FeedbackMessage tone="error" icon="alert-circle" className="flex-1">{profileErrorMessage}</FeedbackMessage>
+        <RetryButton />
+      </div>}
+      <NotesWorkspace notes={notes} loadError={loadError} />
     </div>
-  );
+  </main>
 }

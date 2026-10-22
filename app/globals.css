@@ -1,26 +1,123 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+  --background: light-dark(#f7f9fd, #111213);
+  --foreground: light-dark(#111631, #f4f4f5);
+  --surface: light-dark(#ffffff, #1c1c1d);
+  --surface-highlight: light-dark(#eef0ff, #232326);
+  --input: light-dark(#fbfcff, #161617);
+  --input-border: light-dark(#8a92a9, #66666e);
+  --input-icon: light-dark(#293454, #b0b0bb);
+  --muted: light-dark(#626d89, #b0b0bb);
+  --placeholder: light-dark(#68748b, #96969f);
+  --border: light-dark(#e2e7f0, #424246);
+  --accent: light-dark(#4f46e5, #9aa8ff);
+  --accent-hover: light-dark(#4338ca, #b1bcff);
+  --on-accent: light-dark(#ffffff, #11152b);
+  --primary-from: light-dark(#5b63e8, #9aa8ff);
+  --primary-to: light-dark(#5059e3, #9aa8ff);
+  --primary-hover-brightness: 0.98;
+  --primary-disabled-bg: light-dark(#e1e5ff, #3b4056);
+  --primary-disabled-text: light-dark(#454ec6, #c2cbff);
+  --primary-shadow: 0 5px 14px -7px light-dark(rgb(79 86 223 / 0.4), rgb(0 0 0 / 0.3));
+  --auth-icon-bg: light-dark(#eef0ff, #161617);
+  --auth-icon-border: light-dark(#e5e7ff, #424246);
+  --auth-icon-fg: light-dark(#4f46e5, #f4f4f5);
+  --card-shadow: 0 12px 38px -20px light-dark(rgb(35 55 105 / 0.2), rgb(0 0 0 / 0.14)), 0 2px 10px light-dark(rgb(35 55 105 / 0.035), transparent);
+  --toast-shadow: 0 12px 32px -12px light-dark(rgb(38 50 102 / 0.22), rgb(0 0 0 / 0.45));
+  --danger: light-dark(#c42c3d, #ff7c87);
+  --danger-surface: light-dark(#fff3f4, #2c1c20);
+  --danger-border: light-dark(#efb5bc, #8c3d47);
+  --success: light-dark(#087653, #75e3bf);
+  --success-detail: light-dark(#116b50, #b0b0bb);
+  --success-surface: light-dark(#ecfdf5, #172a24);
+  --success-border: light-dark(#ace6cf, #2b7058);
+  --strength-track: light-dark(#d8dde8, #49494f);
+  --note-indigo: light-dark(#f2f3ff, #242638);
+  --note-indigo-fg: light-dark(#38378c, #c6ceff);
+  --note-indigo-border: light-dark(#d3d7f5, #454b70);
+  --note-teal: light-dark(#edf9f6, #1d302e);
+  --note-teal-fg: light-dark(#166454, #a0e6d8);
+  --note-teal-border: light-dark(#bde3d9, #3a6159);
+  --note-amber: light-dark(#fff8e9, #332c1e);
+  --note-amber-fg: light-dark(#81550d, #f4d28a);
+  --note-amber-border: light-dark(#eddbac, #6b5830);
+  --note-rose: light-dark(#fff1f4, #36232b);
+  --note-rose-fg: light-dark(#963d58, #f4b9cc);
+  --note-rose-border: light-dark(#efcbd7, #704454);
+  --note-violet: light-dark(#f7f1ff, #2e243a);
+  --note-violet-fg: light-dark(#72429d, #dcc1f5);
+  --note-violet-border: light-dark(#e0cfee, #604775);
+  --radius-card: 0.875rem;
+  --radius-control: 0.5rem;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --primary-hover-brightness: 1.05;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --primary-hover-brightness: 1.05;
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-highlight: var(--surface-highlight);
+  --color-input: var(--input);
+  --color-input-border: var(--input-border);
+  --color-input-icon: var(--input-icon);
+  --color-muted: var(--muted);
+  --color-placeholder: var(--placeholder);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-primary-from: var(--primary-from);
+  --color-primary-to: var(--primary-to);
+  --color-primary-disabled-bg: var(--primary-disabled-bg);
+  --color-primary-disabled-text: var(--primary-disabled-text);
+  --color-auth-icon-bg: var(--auth-icon-bg);
+  --color-auth-icon-border: var(--auth-icon-border);
+  --color-auth-icon-fg: var(--auth-icon-fg);
+  --color-danger: var(--danger);
+  --color-danger-surface: var(--danger-surface);
+  --color-danger-border: var(--danger-border);
+  --color-success: var(--success);
+  --color-success-detail: var(--success-detail);
+  --color-success-surface: var(--success-surface);
+  --color-success-border: var(--success-border);
+  --color-strength-track: var(--strength-track);
+  --color-note-indigo: var(--note-indigo);
+  --color-note-indigo-fg: var(--note-indigo-fg);
+  --color-note-indigo-border: var(--note-indigo-border);
+  --color-note-teal: var(--note-teal);
+  --color-note-teal-fg: var(--note-teal-fg);
+  --color-note-teal-border: var(--note-teal-border);
+  --color-note-amber: var(--note-amber);
+  --color-note-amber-fg: var(--note-amber-fg);
+  --color-note-amber-border: var(--note-amber-border);
+  --color-note-rose: var(--note-rose);
+  --color-note-rose-fg: var(--note-rose-fg);
+  --color-note-rose-border: var(--note-rose-border);
+  --color-note-violet: var(--note-violet);
+  --color-note-violet-fg: var(--note-violet-fg);
+  --color-note-violet-border: var(--note-violet-border);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
