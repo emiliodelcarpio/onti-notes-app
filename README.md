@@ -83,13 +83,13 @@ cp .env.example .env.local
 Rellena las variables con las credenciales de tu proyecto de Supabase (las cuales encuentras en **Project Settings -> API**):
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=tu_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=tu_supabase_anon_key
+NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=tu_clave_sb_publishable
 ```
 
 ### 5. Configuración de Autenticación (Supabase Dashboard)
 1. Ve a **Authentication -> Providers -> Email** y asegúrate de que el proveedor por correo esté activo.
-2. En **Authentication -> URL Configuration -> Redirect URLs**, agrega: `http://localhost:3000` (o la URL de tu entorno de despliegue).
+2. En **Authentication -> URL Configuration -> Redirect URLs**, agrega `http://localhost:3000/auth/confirm?type=recovery` y la misma ruta con el origen HTTPS de tu despliegue. Revisa los detalles y la plantilla de recuperación en [AUTH_SETUP.md](./AUTH_SETUP.md).
 
 ### 6. Ejecutar en Entorno de Desarrollo
 ```bash
@@ -116,3 +116,7 @@ Toda la trazabilidad de esta interacción se encuentra documentada en la carpeta
 - `01-chatgpt-prompt.md`: Definición inicial y ajustes de arquitectura, reglas de negocio en `CLAUDE.md`, SQL Schema y vistas iniciales.
 - `02-vscode-chatgpt-codex.md`: Generación de Server Actions, formularios de UI, correcciones de flujos de auth, modo claro/oscuro y Drag and Drop.
 - `03-optimizaciones-y-fase-final.md`: Implementación de carga dinámica, paginación de notas y refinamiento de rendimiento en el dashboard.
+
+## Seguridad
+
+Para una instalación existente, ejecutar "migracion_seguridad_datos.sql" para retirar la lectura pública heredada de perfiles y restringir los permisos por usuario. El archivo local no modifica Supabase hasta ejecutarse allí. Consulta [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) para los hallazgos, verificaciones y límites de la revisión.

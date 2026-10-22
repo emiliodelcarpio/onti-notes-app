@@ -14,8 +14,7 @@
 -- * created_at y updated_at son gestionados automáticamente en la DB.
 -- * El email de autenticación sigue administrándose en Supabase Auth;
 --   profiles.email, si se usa, es una copia que puede desactualizarse.
--- * profiles conserva SELECT público, que también expone email: revisar su
---   privacidad antes de habilitar acceso fuera de pruebas.
+-- * profiles es privado; la API no consulta email ni username heredados.
 -- * avatars es privado, con acceso propio por carpeta y owner_id, hasta 2 MiB
 --   y formatos JPEG/PNG/WebP. Para un bucket existente ejecutar la migración
 --   migracion_avatars_storage.sql; no se borran ni mueven objetos heredados.
@@ -52,29 +51,29 @@ COMMENT ON COLUMN public.profiles.email IS
 COMMENT ON COLUMN public.profiles.username IS
     'Campo heredado; NO se utiliza para iniciar sesión (solo correo y contraseña).';
 
--- 2. Permisos de profiles: reflejan la instalación proporcionada.
--- ATENCIÓN: anon con SELECT y la política pública exponen todas las columnas.
-GRANT SELECT ON TABLE public.profiles TO anon;
-GRANT SELECT, INSERT, UPDATE ON TABLE public.profiles TO authenticated;
+-- 2. Perfil privado: lectura y edición propias, sin correo heredado en la API.
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.profiles FROM PUBLIC, anon, authenticated;
+REVOKE ALL (id, username, full_name, avatar_url, email, created_at, updated_at, theme_preference)
+    ON public.profiles FROM PUBLIC, anon, authenticated;
+GRANT SELECT (id, full_name, avatar_url, theme_preference, created_at, updated_at)
+    ON public.profiles TO authenticated;
+GRANT UPDATE (full_name, avatar_url, theme_preference)
+    ON public.profiles TO authenticated;
 
-DROP POLICY IF EXISTS "Public profiles are viewable by everyone."
-    ON public.profiles;
-DROP POLICY IF EXISTS "Users can insert their own profile."
-    ON public.profiles;
-DROP POLICY IF EXISTS "Users can update own profile."
-    ON public.profiles;
-
-CREATE POLICY "Public profiles are viewable by everyone."
-    ON public.profiles FOR SELECT USING (true);
-
-CREATE POLICY "Users can insert their own profile."
-    ON public.profiles FOR INSERT
-    WITH CHECK ((SELECT auth.uid()) = id);
-
-CREATE POLICY "Users can update own profile."
-    ON public.profiles FOR UPDATE
-    USING ((SELECT auth.uid()) = id);
+DROP POLICY IF EXISTS "Public profiles are viewable by everyone." ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert their own profile." ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile." ON public.profiles;
+DROP POLICY IF EXISTS profiles_select_own ON public.profiles;
+DROP POLICY IF EXISTS profiles_update_own ON public.profiles;
+DROP POLICY IF EXISTS profiles_owner_guard ON public.profiles;
+CREATE POLICY profiles_select_own ON public.profiles FOR SELECT TO authenticated
+    USING (id = (SELECT auth.uid()));
+CREATE POLICY profiles_update_own ON public.profiles FOR UPDATE TO authenticated
+    USING (id = (SELECT auth.uid())) WITH CHECK (id = (SELECT auth.uid()));
+-- Una política permisiva heredada no debe abrir las filas de otro usuario.
+CREATE POLICY profiles_owner_guard ON public.profiles AS RESTRICTIVE FOR ALL TO PUBLIC
+    USING (id = (SELECT auth.uid())) WITH CHECK (id = (SELECT auth.uid()));
 
 -- 3. Timestamps de perfiles: se asignan en la DB y se protegen
 --    frente a modificaciones manuales. No se permite cambiar el ID.
@@ -352,37 +351,37 @@ CREATE INDEX IF NOT EXISTS idx_notes_pending_reminders
     WHERE type = 'reminder'
       AND status NOT IN ('completed', 'archived');
 
--- 11. Permisos y RLS para notas.
+-- 11. Permisos mínimos y RLS por propietario para notas.
 ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
-
 REVOKE ALL ON TABLE public.notes FROM PUBLIC, anon, authenticated;
+REVOKE ALL (id, user_id, title, content, type, priority, status, color, remind_at, created_at, updated_at)
+    ON public.notes FROM PUBLIC, anon, authenticated;
 GRANT SELECT, DELETE ON TABLE public.notes TO authenticated;
 GRANT INSERT (title, content, type, priority, status, color, remind_at)
-    ON TABLE public.notes TO authenticated;
+    ON public.notes TO authenticated;
 GRANT UPDATE (title, content, type, priority, status, color, remind_at)
-    ON TABLE public.notes TO authenticated;
-
+    ON public.notes TO authenticated;
 DROP POLICY IF EXISTS notes_select_own ON public.notes;
 DROP POLICY IF EXISTS notes_insert_own ON public.notes;
 DROP POLICY IF EXISTS notes_update_own ON public.notes;
 DROP POLICY IF EXISTS notes_delete_own ON public.notes;
-
-CREATE POLICY notes_select_own
-    ON public.notes FOR SELECT TO authenticated
+DROP POLICY IF EXISTS notes_owner_guard ON public.notes;
+CREATE POLICY notes_select_own ON public.notes FOR SELECT TO authenticated
     USING (user_id = (SELECT auth.uid()));
-
-CREATE POLICY notes_insert_own
-    ON public.notes FOR INSERT TO authenticated
+CREATE POLICY notes_insert_own ON public.notes FOR INSERT TO authenticated
     WITH CHECK (user_id = (SELECT auth.uid()));
-
-CREATE POLICY notes_update_own
-    ON public.notes FOR UPDATE TO authenticated
-    USING (user_id = (SELECT auth.uid()))
-    WITH CHECK (user_id = (SELECT auth.uid()));
-
-CREATE POLICY notes_delete_own
-    ON public.notes FOR DELETE TO authenticated
+CREATE POLICY notes_update_own ON public.notes FOR UPDATE TO authenticated
+    USING (user_id = (SELECT auth.uid())) WITH CHECK (user_id = (SELECT auth.uid()));
+CREATE POLICY notes_delete_own ON public.notes FOR DELETE TO authenticated
     USING (user_id = (SELECT auth.uid()));
+CREATE POLICY notes_owner_guard ON public.notes AS RESTRICTIVE FOR ALL TO PUBLIC
+    USING (user_id = (SELECT auth.uid())) WITH CHECK (user_id = (SELECT auth.uid()));
+
+-- Retirar la invocación directa desde la API. Los triggers ya instalados
+-- mantienen su ejecución y el administrador conserva sus permisos.
+REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.profiles_before_write() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.notes_before_write() FROM PUBLIC, anon, authenticated;
 
 COMMIT;
 
@@ -395,8 +394,8 @@ COMMIT;
 -- 4. Los campos reales del perfil son full_name, avatar_url, email,
 --    username, created_at y updated_at (además de id y theme_preference).
 -- 5. El campo username, aunque existente, no habilita login por usuario.
--- 6. La política SELECT pública de profiles expone email: revisar antes de
---    cargar información sensible o habilitar acceso fuera de pruebas.
+-- 6. profiles es privado; para actualizar una instalación anterior ejecutar
+--    migracion_seguridad_datos.sql sin borrar datos.
 -- 7. avatars es privado: nuevas rutas <auth.uid()>/<UUID>.(jpg|png|webp),
 --    máximo 2 MiB. La UI usa URLs firmadas; profiles guarda solo la ruta.
 --    Objetos heredados fuera de la carpeta propia requieren volver a subirlos.

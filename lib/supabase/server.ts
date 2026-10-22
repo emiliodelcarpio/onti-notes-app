@@ -1,13 +1,14 @@
+import 'server-only'
+
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import type { Database } from '@/types/database'
+import { getPublicSupabaseConfig } from './config'
 
 export async function createClient() {
   const cookieStore = await cookies()
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-  if (!url || !key) throw new Error('Falta la configuración pública de Supabase.')
+  const { url, key } = getPublicSupabaseConfig()
 
   // Create a server's supabase client with newly configured cookie,
   // which could be used to maintain user's session
@@ -15,6 +16,7 @@ export async function createClient() {
     url,
     key,
     {
+      cookieOptions: { secure: process.env.NODE_ENV === 'production', sameSite: 'lax' },
       cookies: {
         getAll() {
           return cookieStore.getAll()

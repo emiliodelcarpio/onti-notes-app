@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { updateNoteStatus } from '@/actions/notes'
 import Button from '@/components/ui/Button'
@@ -66,13 +66,16 @@ export default function NotesWorkspace({ initialPage, loadError }: NotesWorkspac
   const [priorityFilter, setPriorityFilter] = useState<NotesFilters['priority']>('all')
   const [query, setQuery] = useState('')
   const [view, setView] = useState<'cards' | 'kanban'>('cards')
+  const [createMenuOpen, setCreateMenuOpen] = useState(false)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [deletingNote, setDeletingNote] = useState<Note | null>(null)
   const [pendingStatusId, setPendingStatusId] = useState<string | null>(null)
   const [statusError, setStatusError] = useState('')
   const statusLock = useRef(false)
   const searchRef = useRef<HTMLInputElement>(null)
-  const createMenuRef = useRef<HTMLDetailsElement>(null)
+  const createMenuRef = useRef<HTMLDivElement>(null)
+  const createTriggerRef = useRef<HTMLButtonElement>(null)
+  const createPanelId = useId()
   const { showToast } = useToast()
   const filters = { type: typeFilter, status: statusFilter, priority: priorityFilter, query }
   const cards = useNotesPages(initialPage, loadError, filters, view === 'cards')
@@ -92,15 +95,16 @@ export default function NotesWorkspace({ initialPage, loadError }: NotesWorkspac
   }, [editor, deletingNote])
 
   useEffect(() => {
+    if (!createMenuOpen) return
     function closeCreateMenu(event: PointerEvent) {
       const menu = createMenuRef.current
-      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) {
-        menu.open = false
+      if (menu && event.target instanceof Node && !menu.contains(event.target)) {
+        setCreateMenuOpen(false)
       }
     }
     document.addEventListener('pointerdown', closeCreateMenu)
     return () => document.removeEventListener('pointerdown', closeCreateMenu)
-  }, [])
+  }, [createMenuOpen])
 
   const hasFilters = typeFilter !== 'all' || statusFilter !== 'all' || priorityFilter !== 'all' || query.trim() !== ''
 
@@ -112,9 +116,10 @@ export default function NotesWorkspace({ initialPage, loadError }: NotesWorkspac
   }
 
   function openEditor(type: Note['type']) {
-    if (createMenuRef.current?.open) {
-      createMenuRef.current.open = false
-      createMenuRef.current.querySelector('summary')?.focus()
+    if (createMenuOpen) {
+      // Return focus before unmounting the option, so the dialog can restore it.
+      createTriggerRef.current?.focus({ preventScroll: true })
+      setCreateMenuOpen(false)
     }
     setEditor({ type })
   }
@@ -168,20 +173,24 @@ export default function NotesWorkspace({ initialPage, loadError }: NotesWorkspac
           <input ref={searchRef} id="notes-search" type="search" maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar notas o recordatorios…" aria-keyshortcuts="Control+k Meta+k" className="min-w-0 flex-1 bg-transparent py-4 text-sm text-foreground outline-none placeholder:text-placeholder" />
           <kbd aria-hidden="true" className="ml-2 hidden rounded-md border border-border px-1.5 py-1 text-xs text-muted 2xl:block">⌘ K</kbd>
         </div>
-        <details ref={createMenuRef} className="relative sm:col-span-2 xl:col-span-1" onKeyDown={(event) => {
-          if (event.key === 'Escape' && createMenuRef.current?.open) {
-            createMenuRef.current.open = false
-            createMenuRef.current.querySelector('summary')?.focus()
+        <div ref={createMenuRef} className="relative sm:col-span-2 xl:col-span-1" onKeyDown={(event) => {
+          if (event.key === 'Escape' && createMenuOpen) {
+            event.preventDefault()
+            event.stopPropagation()
+            setCreateMenuOpen(false)
+            createTriggerRef.current?.focus({ preventScroll: true })
           }
         }} onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget) && createMenuRef.current) createMenuRef.current.open = false
+          // A touch in Safari can blur without a focus target. Keep the options
+          // mounted until their click runs or the user interacts outside.
+          if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setCreateMenuOpen(false)
         }}>
-          <summary data-focus-fallback className={`flex min-h-[54px] cursor-pointer list-none items-center justify-center gap-3 rounded-xl bg-linear-to-br from-primary-from to-primary-to px-5 py-3 text-sm font-semibold text-on-accent shadow-(--primary-shadow) transition-[filter] hover:brightness-(--primary-hover-brightness) [&::-webkit-details-marker]:hidden ${focusClassName}`}><Icon name="plus" />Nueva nota<Icon name="chevron-down" className="size-4" /></summary>
-          <div className="absolute right-0 z-20 mt-2 w-full min-w-52 overflow-hidden rounded-xl border border-border bg-surface p-1.5 shadow-(--toast-shadow)">
+          <button ref={createTriggerRef} type="button" data-focus-fallback aria-expanded={createMenuOpen} aria-controls={createMenuOpen ? createPanelId : undefined} onClick={() => setCreateMenuOpen((current) => !current)} className={`flex min-h-[54px] w-full cursor-pointer items-center justify-center gap-3 rounded-xl bg-linear-to-br from-primary-from to-primary-to px-5 py-3 text-sm font-semibold text-on-accent shadow-(--primary-shadow) transition-[filter] hover:brightness-(--primary-hover-brightness) ${focusClassName}`}><Icon name="plus" />Nueva nota<Icon name="chevron-down" className="size-4" /></button>
+          {createMenuOpen && <div id={createPanelId} className="absolute right-0 top-full z-20 mt-2 w-full min-w-52 overflow-hidden rounded-xl border border-border bg-surface p-1.5 shadow-(--toast-shadow)">
             <button type="button" onClick={() => openEditor('note')} className={`flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-surface-highlight ${focusClassName}`}><Icon name="file" className="text-accent" />Nueva nota</button>
             <button type="button" onClick={() => openEditor('reminder')} className={`flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-surface-highlight ${focusClassName}`}><Icon name="calendar" className="text-accent" />Nuevo recordatorio</button>
-          </div>
-        </details>
+          </div>}
+        </div>
       </div>
 
       <div className="mt-6 mb-5 flex flex-wrap items-center justify-between gap-4">
@@ -234,7 +243,7 @@ export default function NotesWorkspace({ initialPage, loadError }: NotesWorkspac
       {deletingNote && <DeleteNoteDialog note={deletingNote} onClose={() => setDeletingNote(null)} onDeleted={() => {
         setDeletingNote(null)
         // The deleted card can remain until revalidation finishes. Return to a stable control.
-        requestAnimationFrame(() => createMenuRef.current?.querySelector('summary')?.focus())
+        requestAnimationFrame(() => createTriggerRef.current?.focus({ preventScroll: true }))
       }} />}
     </section>
   )

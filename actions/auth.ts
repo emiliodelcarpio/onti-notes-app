@@ -9,6 +9,14 @@ import type { AuthResult } from '@/types/auth'
 const unavailable = 'No pudimos completar la solicitud. Inténtalo de nuevo más tarde.'
 const neutral = { success: true }
 
+function isAuthForm(formData: unknown, allowedFields: readonly string[]): formData is FormData {
+  if (!(formData instanceof FormData)) return false
+  for (const key of formData.keys()) {
+    if (!allowedFields.includes(key) || formData.getAll(key).length !== 1) return false
+  }
+  return true
+}
+
 function readEmail(formData: FormData) {
   const value = formData.get('email')
   if (typeof value !== 'string') return null
@@ -49,7 +57,8 @@ async function getRecoveryRedirectUrl() {
   if (!origin || !host) throw new Error('Missing request origin.')
 
   const url = new URL(origin)
-  if (url.origin !== origin || url.host !== host || !['http:', 'https:'].includes(url.protocol)) {
+  if (url.origin !== origin || url.host !== host || !['http:', 'https:'].includes(url.protocol) ||
+      (process.env.NODE_ENV === 'production' && url.protocol !== 'https:')) {
     throw new Error('Invalid request origin.')
   }
 
@@ -58,6 +67,7 @@ async function getRecoveryRedirectUrl() {
 }
 
 export async function login(formData: FormData): Promise<AuthResult> {
+  if (!isAuthForm(formData, ['email', 'password'])) return { success: false, error: 'Revisa los datos del formulario.' }
   const email = readEmail(formData)
   const password = readPassword(formData)
   if (!email || !password) return { success: false, error: 'Introduce un correo válido y una contraseña de hasta 128 caracteres.' }
@@ -73,6 +83,7 @@ export async function login(formData: FormData): Promise<AuthResult> {
 }
 
 export async function register(formData: FormData): Promise<AuthResult> {
+  if (!isAuthForm(formData, ['email', 'password', 'confirmPassword'])) return { success: false, error: 'Revisa los datos del formulario.' }
   const email = readEmail(formData)
   if (!email) return { success: false, error: 'Introduce un correo electrónico válido.' }
   const validated = validateNewPassword(formData)
@@ -91,6 +102,7 @@ export async function register(formData: FormData): Promise<AuthResult> {
 }
 
 export async function forgotPassword(formData: FormData): Promise<AuthResult> {
+  if (!isAuthForm(formData, ['email'])) return { success: false, error: 'Revisa los datos del formulario.' }
   const email = readEmail(formData)
   if (!email) return { success: false, error: 'Introduce un correo electrónico válido.' }
   try {
@@ -126,7 +138,7 @@ async function savePassword(formData: FormData, flow: 'account' | 'recovery'): P
   let passwordSaved = false
   const incompleteRecovery = 'Tu contraseña ya se guardó, pero no pudimos finalizar el cierre de sesión. Cierra la sesión y vuelve a entrar con tu nueva contraseña.'
   try {
-    if (!(formData instanceof FormData)) return { success: false, error: 'Revisa los datos del formulario.' }
+    if (!isAuthForm(formData, ['password', 'confirmPassword'])) return { success: false, error: 'Revisa los datos del formulario.' }
     const validated = validateNewPassword(formData)
     if (!validated.password) return { success: false, error: validated.error }
     const supabase = await createClient()
