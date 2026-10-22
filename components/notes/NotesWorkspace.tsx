@@ -1,41 +1,51 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
-import { useRouter } from 'next/navigation'
 import { updateNoteStatus } from '@/actions/notes'
 import Button from '@/components/ui/Button'
 import Icon from '@/components/ui/Icon'
 import type { IconName } from '@/components/ui/Icon'
-import type { Note } from '@/types/notes'
+import type { Note, NotesFilters, NotesPage } from '@/types/notes'
 import { useToast } from '@/components/ui/ToastProvider'
 import DeleteNoteDialog from './DeleteNoteDialog'
 import EmptyNotes from './EmptyNotes'
 import NoteCard from './NoteCard'
 import NoteEditor from './NoteEditor'
 import KanbanBoard from './KanbanBoard'
+import InfiniteNotesLoader from './InfiniteNotesLoader'
+import useKanbanPages from './useKanbanPages'
+import useNotesPages from './useNotesPages'
 import { focusClassName, notePriorities, noteStatuses } from './options'
 
 type NotesWorkspaceProps = {
-  notes: Note[]
+  initialPage: NotesPage
   loadError?: string
 }
 
 type EditorState = { type: Note['type']; note?: Note }
+const typeTabs: { value: NotesFilters['type']; label: string; icon: 'file' | 'calendar' | null }[] = [
+  { value: 'all', label: 'Todas', icon: null },
+  { value: 'note', label: 'Notas', icon: 'file' },
+  { value: 'reminder', label: 'Recordatorios', icon: 'calendar' },
+]
 
-function FilterSelect({ label, value, icon, options, onChange }: {
+function FilterSelect<T extends string>({ label, value, icon, options, onChange }: {
   label: string
-  value: string
+  value: T
   icon: IconName
-  options: { value: string; label: string }[]
-  onChange: (value: string) => void
+  options: { value: T; label: string }[]
+  onChange: (value: T) => void
 }) {
   return (
     <label className="relative flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
       <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-surface-highlight text-accent"><Icon name={icon} /></span>
       <span className="min-w-0 flex-1">
         <span className="block text-xs text-muted">{label}</span>
-        <select aria-label={`Filtrar por ${label.toLowerCase()}`} value={value} onChange={(event) => onChange(event.target.value)} className="min-h-6 w-full cursor-pointer appearance-none bg-transparent pr-5 text-sm font-medium text-foreground outline-none">
+        <select aria-label={`Filtrar por ${label.toLowerCase()}`} value={value} onChange={(event) => {
+          const option = options.find((item) => item.value === event.target.value)
+          if (option) onChange(option.value)
+        }} className="min-h-6 w-full cursor-pointer appearance-none bg-transparent pr-5 text-sm font-medium text-foreground outline-none">
           {options.map((option) => <option key={option.value} value={option.value} className="bg-surface text-foreground">{option.label}</option>)}
         </select>
       </span>
@@ -44,32 +54,31 @@ function FilterSelect({ label, value, icon, options, onChange }: {
   )
 }
 
-function normalizeSearch(value: string) {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es')
-}
-
 // The current profile schema has no timezone. Hydrate with UTC, then use the device zone.
 function subscribeToTimezone() { return () => {} }
 function getBrowserTimezone() { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }
 function getServerTimezone() { return 'UTC' }
 
-export default function NotesWorkspace({ notes, loadError }: NotesWorkspaceProps) {
+export default function NotesWorkspace({ initialPage, loadError }: NotesWorkspaceProps) {
   const timezone = useSyncExternalStore(subscribeToTimezone, getBrowserTimezone, getServerTimezone)
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [priorityFilter, setPriorityFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState<NotesFilters['type']>('all')
+  const [statusFilter, setStatusFilter] = useState<NotesFilters['status']>('all')
+  const [priorityFilter, setPriorityFilter] = useState<NotesFilters['priority']>('all')
   const [query, setQuery] = useState('')
   const [view, setView] = useState<'cards' | 'kanban'>('cards')
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [deletingNote, setDeletingNote] = useState<Note | null>(null)
-  const [refreshing, startRefresh] = useTransition()
   const [pendingStatusId, setPendingStatusId] = useState<string | null>(null)
   const [statusError, setStatusError] = useState('')
   const statusLock = useRef(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const createMenuRef = useRef<HTMLDetailsElement>(null)
-  const router = useRouter()
   const { showToast } = useToast()
+  const filters = { type: typeFilter, status: statusFilter, priority: priorityFilter, query }
+  const cards = useNotesPages(initialPage, loadError, filters, view === 'cards')
+  const kanban = useKanbanPages(initialPage, filters, view === 'kanban')
+  const { notes, loading, loadingMore, error, retry } = view === 'cards' ? cards : kanban
+  const pagingDisabled = pendingStatusId !== null || editor !== null || deletingNote !== null
 
   useEffect(() => {
     function focusSearch(event: KeyboardEvent) {
@@ -93,15 +102,6 @@ export default function NotesWorkspace({ notes, loadError }: NotesWorkspaceProps
     return () => document.removeEventListener('pointerdown', closeCreateMenu)
   }, [])
 
-  const filteredNotes = useMemo(() => {
-    const search = normalizeSearch(query.trim())
-    return notes.filter((note) =>
-      (typeFilter === 'all' || note.type === typeFilter) &&
-      (statusFilter === 'all' || note.status === statusFilter) &&
-      (priorityFilter === 'all' || note.priority === priorityFilter) &&
-      (!search || normalizeSearch(`${note.title} ${note.content ?? ''}`).includes(search)),
-    )
-  }, [notes, typeFilter, statusFilter, priorityFilter, query])
   const hasFilters = typeFilter !== 'all' || statusFilter !== 'all' || priorityFilter !== 'all' || query.trim() !== ''
 
   function resetFilters() {
@@ -109,10 +109,6 @@ export default function NotesWorkspace({ notes, loadError }: NotesWorkspaceProps
     setStatusFilter('all')
     setPriorityFilter('all')
     setQuery('')
-  }
-
-  function refresh() {
-    startRefresh(() => router.refresh())
   }
 
   function openEditor(type: Note['type']) {
@@ -141,8 +137,7 @@ export default function NotesWorkspace({ notes, loadError }: NotesWorkspaceProps
         return false
       }
       showToast('Estatus actualizado', `«${current.title}» está en ${status.label.toLowerCase()}.`)
-      refresh()
-      if (statusFilter !== 'all' && statusFilter !== status.value) requestAnimationFrame(() => {
+      if (hasFilters || view === 'kanban') requestAnimationFrame(() => {
         const active = document.activeElement
         if (active === document.body || active === focusOrigin || (active instanceof HTMLElement && active.dataset.kanbanStatus === status.value)) searchRef.current?.focus()
       })
@@ -170,7 +165,7 @@ export default function NotesWorkspace({ notes, loadError }: NotesWorkspaceProps
         <div className="relative flex min-h-[66px] items-center rounded-xl border border-input-border bg-input px-4 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
           <Icon name="search" className="mr-3 text-muted" />
           <label htmlFor="notes-search" className="sr-only">Buscar notas o recordatorios</label>
-          <input ref={searchRef} id="notes-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar notas o recordatorios…" aria-keyshortcuts="Control+k Meta+k" className="min-w-0 flex-1 bg-transparent py-4 text-sm text-foreground outline-none placeholder:text-placeholder" />
+          <input ref={searchRef} id="notes-search" type="search" maxLength={200} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar notas o recordatorios…" aria-keyshortcuts="Control+k Meta+k" className="min-w-0 flex-1 bg-transparent py-4 text-sm text-foreground outline-none placeholder:text-placeholder" />
           <kbd aria-hidden="true" className="ml-2 hidden rounded-md border border-border px-1.5 py-1 text-xs text-muted 2xl:block">⌘ K</kbd>
         </div>
         <details ref={createMenuRef} className="relative sm:col-span-2 xl:col-span-1" onKeyDown={(event) => {
@@ -191,11 +186,7 @@ export default function NotesWorkspace({ notes, loadError }: NotesWorkspaceProps
 
       <div className="mt-6 mb-5 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Tipo de contenido">
-          {[
-            { value: 'all', label: 'Todas', icon: null },
-            { value: 'note', label: 'Notas', icon: 'file' },
-            { value: 'reminder', label: 'Recordatorios', icon: 'calendar' },
-          ].map((tab) => (
+          {typeTabs.map((tab) => (
             <button key={tab.value} type="button" aria-pressed={typeFilter === tab.value} onClick={() => setTypeFilter(tab.value)} className={`flex min-h-11 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors sm:px-5 ${focusClassName} ${typeFilter === tab.value ? 'border-transparent bg-accent text-on-accent' : 'border-border bg-surface text-foreground hover:border-accent'}`}>
               {tab.icon === 'file' && <Icon name="file" className="size-4" />}
               {tab.icon === 'calendar' && <Icon name="calendar" className="size-4" />}
@@ -203,36 +194,45 @@ export default function NotesWorkspace({ notes, loadError }: NotesWorkspaceProps
             </button>
           ))}
         </div>
-        {notes.length > 0 && <div className="flex items-center gap-3">
-          <p role="status" className="text-xs text-muted">{filteredNotes.length} de {notes.length}</p>
+        <div className="flex items-center gap-3">
+          <p role="status" className="text-xs text-muted">{loading ? 'Cargando notas…' : `${notes.length} ${notes.length === 1 ? 'nota cargada' : 'notas cargadas'}`}</p>
           <div className="flex rounded-lg border border-border bg-surface p-1" role="group" aria-label="Vista de contenido">
             <button type="button" aria-label="Ver tarjetas" title="Tarjetas" aria-pressed={view === 'cards'} onClick={() => setView('cards')} className={`flex size-9 items-center justify-center rounded-md ${focusClassName} ${view === 'cards' ? 'bg-surface-highlight text-accent' : 'text-muted hover:text-foreground'}`}><Icon name="grid" className="size-4" /></button>
             <button type="button" aria-label="Ver columnas Kanban" title="Columnas Kanban" aria-pressed={view === 'kanban'} onClick={() => setView('kanban')} className={`flex size-9 items-center justify-center rounded-md ${focusClassName} ${view === 'kanban' ? 'bg-surface-highlight text-accent' : 'text-muted hover:text-foreground'}`}><Icon name="columns" className="size-4" /></button>
           </div>
-        </div>}
+        </div>
       </div>
       {hasFilters && <div className="-mt-2 mb-4 flex items-center gap-2 text-xs text-muted"><Icon name="filter" className="size-3.5" />Filtros activos<button type="button" onClick={resetFilters} className={`min-h-9 rounded px-2 font-medium text-accent hover:underline ${focusClassName}`}>Limpiar filtros</button></div>}
 
       {statusError && <p role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-danger-border bg-danger-surface p-3 text-sm leading-6 text-danger"><Icon name="alert-circle" className="mt-0.5" />{statusError}</p>}
-      {loadError ? (
-        <div className="flex min-h-80 flex-col items-center justify-center rounded-2xl border border-danger-border bg-surface p-8 text-center">
-          <Icon name="alert-circle" className="size-8 text-danger" />
-          <h2 className="mt-4 text-lg font-semibold">No pudimos cargar tu espacio</h2>
-          <p role="alert" className="mt-2 max-w-md text-sm leading-6 text-muted">{loadError}</p>
-          <div className="mt-5"><Button variant="secondary" pending={refreshing} onClick={refresh}>{refreshing ? 'Cargando…' : 'Volver a intentar'}</Button></div>
-        </div>
-      ) : filteredNotes.length === 0 ? (
-        <EmptyNotes filtered={notes.length > 0 || hasFilters} onCreate={openEditor} onReset={resetFilters} />
-      ) : view === 'cards' ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{filteredNotes.map((note) => card(note))}</div>
-      ) : (
-        <KanbanBoard notes={filteredNotes} pending={pendingStatusId !== null} renderNote={card} onStatusChange={changeStatus} />
-      )}
+      <div aria-busy={loading || loadingMore}>
+        {loading ? (
+          <div role="status" className="flex min-h-80 items-center justify-center gap-3 rounded-2xl border border-border bg-surface p-8 text-sm text-muted">
+            <Icon name="loader" className="size-5 text-accent motion-safe:animate-spin" />Buscando tus notas…
+          </div>
+        ) : error ? (
+          <div className="flex min-h-80 flex-col items-center justify-center rounded-2xl border border-danger-border bg-surface p-8 text-center">
+            <Icon name="alert-circle" className="size-8 text-danger" />
+            <h2 className="mt-4 text-lg font-semibold">No pudimos cargar tu espacio</h2>
+            <p role="alert" className="mt-2 max-w-md text-sm leading-6 text-muted">{error}</p>
+            <div className="mt-5"><Button variant="secondary" onClick={retry}>Volver a intentar</Button></div>
+          </div>
+        ) : notes.length === 0 ? (
+          <EmptyNotes filtered={hasFilters} onCreate={openEditor} onReset={resetFilters} />
+        ) : view === 'cards' ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{notes.map((note) => card(note))}</div>
+        ) : (
+          <KanbanBoard notes={notes} columns={kanban.columns} loadMoreColumn={kanban.loadMoreColumn} pending={pagingDisabled} renderNote={card} onStatusChange={changeStatus} />
+        )}
+        {view === 'cards' && !loading && !error && notes.length > 0 && <div className="mt-6">
+          <InfiniteNotesLoader hasMore={cards.hasMore} loading={cards.loadingMore} error={cards.appendError} onLoadMore={cards.loadMore} disabled={pagingDisabled}
+            endMessage={`Has visto todas las notas${hasFilters ? ' que coinciden con tus filtros' : ''}.`} />
+        </div>}
+      </div>
 
-      {editor && <NoteEditor key={editor.note?.id ?? editor.type} note={editor.note} initialType={editor.type} timezone={timezone} onClose={() => setEditor(null)} onSaved={() => { setEditor(null); refresh() }} />}
+      {editor && <NoteEditor key={editor.note?.id ?? editor.type} note={editor.note} initialType={editor.type} timezone={timezone} onClose={() => setEditor(null)} onSaved={() => setEditor(null)} />}
       {deletingNote && <DeleteNoteDialog note={deletingNote} onClose={() => setDeletingNote(null)} onDeleted={() => {
         setDeletingNote(null)
-        refresh()
         // The deleted card can remain until revalidation finishes. Return to a stable control.
         requestAnimationFrame(() => createMenuRef.current?.querySelector('summary')?.focus())
       }} />}

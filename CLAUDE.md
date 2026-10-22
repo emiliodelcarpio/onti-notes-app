@@ -33,7 +33,7 @@ types/        # Tipos TypeScript de dominio y base de datos
 - `components/`: UI reutilizable; agregar `'use client'` solo cuando sea necesario.
 - `lib/`: configuración de Supabase y utilidades mínimas, sin lógica de presentación.
 - `types/`: tipos compartidos explícitos; evitar duplicar los tipos generados de la base de datos.
-- Mantener el esquema SQL oficial en `squema.sql` en la raíz. No modificar tablas o RLS sin actualizar también ese archivo y los tipos correspondientes.
+- Mantener el esquema SQL oficial en `schema.sql` en la raíz. No modificar tablas o RLS sin actualizar también ese archivo y los tipos correspondientes.
 - Usar `app/api/` únicamente si hace falta exponer un endpoint HTTP.
 
 ## Server y Client Components
@@ -65,7 +65,8 @@ types/        # Tipos TypeScript de dominio y base de datos
 - `created_at` y `updated_at` son `TIMESTAMPTZ NOT NULL DEFAULT now()`; la base de datos los mantiene automáticamente: `created_at` no se modifica y `updated_at` cambia con las ediciones del perfil.
 - El perfil se crea automáticamente mediante `public.handle_new_user()` al registrarse en `auth.users`, copiando `full_name` y `avatar_url` de metadatos si existen. La migración `migracion_profiles_created_at.sql` conserva fechas de `dated_at` y rellena fechas de creación vacías con `auth.users.created_at` cuando exista; no sincroniza `email` automáticamente.
 - En el SQL actualmente aplicado, `profiles` tiene lectura pública (incluido `email`) y cada usuario puede insertar y actualizar su propio perfil. **No asumir privacidad del perfil**: revisar y endurecer las políticas con una migración explícita antes de publicar la aplicación.
-- Validar `full_name`, avatar y `theme_preference` en el servidor; nunca utilizar `raw_user_meta_data` para autorización. No ofrecer edición de zona horaria mientras no exista la columna. Existe un bucket `avatars` con permisos heredados de lectura y subida amplios: restringirlos antes de uso público.
+- Validar `full_name`, avatar y `theme_preference` en el servidor; nunca utilizar `raw_user_meta_data` para autorización. No ofrecer edición de zona horaria mientras no exista la columna.
+- La foto se edita por separado dentro de la edición del perfil: subir JPEG, PNG o WebP de hasta 2 MiB al bucket privado `avatars`, sin introducir una URL. Generar en el servidor la ruta `<auth.uid()>/<UUID>.(jpg|png|webp)`, validar tamaño, MIME y contenido, y usar las credenciales normales del usuario; no `service_role` ni `upsert`. Guardar únicamente la ruta en `profiles.avatar_url` y firmarla temporalmente para mostrarla. Conservar la visualización de HTTPS heredados hasta que el usuario cambie su foto. La migración explícita `migracion_avatars_storage.sql` sustituye los permisos amplios conocidos, exige carpeta y `owner_id` propios para lectura/subida/borrado y bloquea sobrescrituras; no migra ni elimina archivos heredados. Mantener independientes el guardado del nombre y el de la imagen.
 
 ## Modelo funcional de notas y recordatorios
 - Usar **una sola entidad `Note`** para notas normales y recordatorios, diferenciada por el campo `type`: `note` | `reminder`.
@@ -85,7 +86,7 @@ types/        # Tipos TypeScript de dominio y base de datos
 - Si se implementan envíos de prueba, enviarlos únicamente a cuentas autorizadas, evitar duplicados, respetar cambios y cancelaciones, proteger credenciales y registrar resultados y errores. Un Cron periódico no garantiza precisión al segundo; nunca indicar que se envió un correo sin verificar el resultado.
 - No se requiere configuración productiva, dominio de envío, entregabilidad garantizada ni integración con Resend por ahora. Hasta implementar el envío de prueba, la interfaz no debe prometer notificaciones reales. No crear todavía Edge Functions ni integraciones de correo.
 - Las notas pueden cambiar de prioridad, estatus y color, y verse por columnas Kanban según su estatus. Mantener el MVP simple: no agregar colaboración, recurrencias ni notificaciones en tiempo real sin nueva decisión.
-- `created_at` **no aparece por arte de magia en una tabla nueva**: mantener la columna declarada explícitamente en `squema.sql` con valor predeterminado de base de datos (`now()`). Supabase Auth ya administra sus propios campos internos; este requisito aplica a nuestras tablas de aplicación.
+- `created_at` **no aparece por arte de magia en una tabla nueva**: mantener la columna declarada explícitamente en `schema.sql` con valor predeterminado de base de datos (`now()`). Supabase Auth ya administra sus propios campos internos; este requisito aplica a nuestras tablas de aplicación.
 
 ## Diseño y experiencia de usuario (UX/UI)
 - Estilo **minimalista premium**, cálido y funcional: la prioridad es crear, encontrar y gestionar notas y recordatorios sin distracciones. Evitar pantallas vacías, exceso de adornos y animaciones innecesarias.

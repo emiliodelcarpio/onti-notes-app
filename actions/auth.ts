@@ -122,18 +122,42 @@ export async function logout(): Promise<AuthResult> {
   }
 }
 
-export async function updatePassword(formData: FormData): Promise<AuthResult> {
-  const validated = validateNewPassword(formData)
-  if (!validated.password) return { success: false, error: validated.error }
+async function savePassword(formData: FormData, flow: 'account' | 'recovery'): Promise<AuthResult> {
+  let passwordSaved = false
+  const incompleteRecovery = 'Tu contraseña ya se guardó, pero no pudimos finalizar el cierre de sesión. Cierra la sesión y vuelve a entrar con tu nueva contraseña.'
   try {
+    if (!(formData instanceof FormData)) return { success: false, error: 'Revisa los datos del formulario.' }
+    const validated = validateNewPassword(formData)
+    if (!validated.password) return { success: false, error: validated.error }
     const supabase = await createClient()
     const { data, error: sessionError } = await supabase.auth.getUser()
     if (sessionError || !data.user) return { success: false, error: 'El enlace no es válido o ha caducado. Solicita uno nuevo.' }
     const { error } = await supabase.auth.updateUser({ password: validated.password })
     if (error) return { success: false, error: 'No pudimos cambiar la contraseña. Usa una contraseña distinta de entre 8 y 128 caracteres e inténtalo de nuevo.' }
+    passwordSaved = true
+    if (flow === 'recovery') {
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' })
+      if (signOutError) {
+        // The SDK can clear local storage even when server-side revocation fails.
+        // This read only verifies cleanup; authorization above always uses getUser.
+        const { data: remaining, error: cleanupError } = await supabase.auth.getSession()
+        if (cleanupError || remaining.session) {
+          revalidatePath('/', 'layout')
+          return { success: false, error: incompleteRecovery }
+        }
+      }
+    }
     revalidatePath('/', 'layout')
     return { success: true }
   } catch {
-    return { success: false, error: unavailable }
+    return { success: false, error: passwordSaved && flow === 'recovery' ? incompleteRecovery : unavailable }
   }
+}
+
+export async function updatePassword(formData: FormData): Promise<AuthResult> {
+  return savePassword(formData, 'account')
+}
+
+export async function completePasswordRecovery(formData: FormData): Promise<AuthResult> {
+  return savePassword(formData, 'recovery')
 }

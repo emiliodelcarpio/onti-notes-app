@@ -3,7 +3,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import Icon from '@/components/ui/Icon'
-import type { Note } from '@/types/notes'
+import type { KanbanColumnState, Note } from '@/types/notes'
+import InfiniteNotesLoader from './InfiniteNotesLoader'
 import { focusClassName, noteStatuses } from './options'
 
 type Status = Note['status']
@@ -13,8 +14,10 @@ type PointerState = {
   startX: number; startY: number; x: number; y: number; started: boolean
 }
 
-export default function KanbanBoard({ notes, pending, renderNote, onStatusChange }: {
+export default function KanbanBoard({ notes, columns: columnStates, loadMoreColumn, pending, renderNote, onStatusChange }: {
   notes: Note[]
+  columns: KanbanColumnState[]
+  loadMoreColumn: (status: Status) => Promise<void>
   pending: boolean
   renderNote: (note: Note, dragHandle: ReactNode) => ReactNode
   onStatusChange: (note: Note, status: Status) => Promise<boolean>
@@ -86,6 +89,17 @@ export default function KanbanBoard({ notes, pending, renderNote, onStatusChange
       if (step) {
         board.scrollBy({ left: step, behavior: 'auto' })
         updateTarget(findTarget(current.x, current.y))
+      }
+      const target = findTarget(current.x, current.y)
+      const scroller = target ? columns.current.get(target)?.querySelector<HTMLElement>('[data-kanban-scroll]') : null
+      if (scroller) {
+        const scrollBounds = scroller.getBoundingClientRect()
+        const top = Math.max(scrollBounds.top, 0)
+        const bottom = Math.min(scrollBounds.bottom, window.innerHeight)
+        if (current.y >= top && current.y <= bottom) {
+          const verticalStep = current.y < top + margin ? -12 : current.y > bottom - margin ? 12 : 0
+          if (verticalStep) scroller.scrollBy({ top: verticalStep, behavior: 'auto' })
+        }
       }
     }
     animation.current = requestAnimationFrame(autoScroll)
@@ -181,22 +195,24 @@ export default function KanbanBoard({ notes, pending, renderNote, onStatusChange
   }
 
   return <div>
-    <p id={instructionsId} className="mb-3 text-xs leading-5 text-muted">Arrastra desde el control de una tarjeta hasta otro estatus. También puedes usar su selector de estatus.</p>
+    <p id={instructionsId} className="mb-3 text-xs leading-5 text-muted">Desplázate dentro de cada columna para cargar más notas. Arrastra desde el control de una tarjeta hasta otro estatus. También puedes usar su selector de estatus.</p>
     <p id={keyboardHelpId} className="sr-only">En el control para mover, pulsa Espacio o Enter para seleccionar. Usa las flechas para elegir columna y Espacio o Enter para guardar. Escape cancela.</p>
     <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</p>
-    <div ref={boardRef} className="overflow-x-auto rounded-2xl border border-border bg-background p-3" tabIndex={0} aria-label="Columnas Kanban. Desplaza horizontalmente para ver todos los estatus.">
+    <div ref={boardRef} className="relative overflow-x-auto rounded-2xl border border-border bg-background p-3" tabIndex={0} aria-label="Columnas Kanban. Desplaza horizontalmente para ver todos los estatus.">
       <div className="flex items-stretch gap-4 pb-2">
         {noteStatuses.map((status) => {
-          const columnNotes = notes.filter((note) => note.status === status.value)
+          const column = columnStates.find((item) => item.status === status.value)
+          const columnNotes = column?.notes ?? notes.filter((note) => note.status === status.value)
           const targeted = drag?.target === status.value
           return <section key={status.value} ref={(node) => {
             if (node) columns.current.set(status.value, node)
             else columns.current.delete(status.value)
           }} data-kanban-status={status.value} tabIndex={-1} aria-label={status.label}
             className={`w-72 shrink-0 rounded-xl border-2 p-3 outline-offset-2 focus-visible:outline-2 focus-visible:outline-accent ${targeted ? 'border-accent bg-accent/10' : 'border-transparent bg-surface-highlight'}`}>
-            <h2 className="mb-2 flex items-center justify-between gap-3 px-1 text-sm font-semibold">{status.label}<span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs text-muted">{columnNotes.length}</span></h2>
+            <h2 className="mb-2 flex items-center justify-between gap-3 px-1 text-sm font-semibold">{status.label}<span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs text-muted">{columnNotes.length}<span className="sr-only"> notas cargadas</span></span></h2>
             <p aria-hidden="true" className="mb-2 min-h-5 px-1 text-xs font-medium text-accent">{targeted ? drag.note.status === status.value ? 'Estatus actual' : 'Soltar aquí' : ''}</p>
-            <div className="min-h-40 space-y-3">
+            <KanbanColumnNotes status={status.value} label={status.label} column={column} disabled={pending || drag !== null}
+              onLoadMore={() => loadMoreColumn(status.value)}>
               {columnNotes.length ? columnNotes.map((note) => <div key={note.id} className={drag?.note.id === note.id ? 'opacity-60' : undefined}>
                 {renderNote(note, <button type="button" data-kanban-handle={note.id} disabled={pending}
                   aria-label={`Mover «${note.title}» a otro estatus`} aria-describedby={`${instructionsId} ${keyboardHelpId}`}
@@ -208,11 +224,29 @@ export default function KanbanBoard({ notes, pending, renderNote, onStatusChange
                   className={`-ml-3 -mr-2 flex size-11 shrink-0 touch-none select-none items-center justify-center rounded-lg hover:bg-surface disabled:cursor-wait disabled:opacity-40 ${drag?.note.id === note.id ? 'cursor-grabbing' : 'cursor-grab'} ${focusClassName}`}>
                   <Icon name="grip" className="size-4" />
                 </button>)}
-              </div>) : <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted">{drag ? 'Suelta aquí para cambiar el estatus' : 'Sin contenido en este estatus'}</p>}
-            </div>
+              </div>) : <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted">{drag ? 'Suelta aquí para cambiar el estatus' : 'Sin notas cargadas en este estatus'}</p>}
+            </KanbanColumnNotes>
           </section>
         })}
       </div>
     </div>
+  </div>
+}
+
+function KanbanColumnNotes({ status, label, column, disabled, onLoadMore, children }: {
+  status: Status
+  label: string
+  column: KanbanColumnState | undefined
+  disabled: boolean
+  onLoadMore: () => Promise<void>
+  children: ReactNode
+}) {
+  const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null)
+  return <div ref={setScrollRoot} data-kanban-scroll={status} tabIndex={0} aria-label={`Notas en ${label}. Desplaza para cargar más.`}
+    className={`relative max-h-[65dvh] min-h-80 space-y-3 overflow-y-auto overscroll-contain rounded-lg pr-1 ${focusClassName}`}>
+    {children}
+    <InfiniteNotesLoader hasMore={column?.hasMore ?? false} loading={column?.loading ?? false} error={column?.error}
+      disabled={disabled || scrollRoot === null} root={scrollRoot} onLoadMore={onLoadMore}
+      endMessage={column?.notes.length ? 'No hay más notas en este estatus.' : undefined} />
   </div>
 }

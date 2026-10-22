@@ -10,8 +10,8 @@ import type { Profile, ThemePreference } from '@/types/profile'
 
 const unavailable = 'No pudimos guardar tu perfil. Inténtalo de nuevo.'
 const expiredSession = 'Tu sesión ha caducado. Inicia sesión de nuevo.'
-const editableFields = new Set(['full_name', 'avatar_url'])
-type ProfileInput = Pick<Profile, 'full_name' | 'avatar_url'>
+const editableFields = new Set(['full_name'])
+type ProfileInput = Pick<Profile, 'full_name'>
 type ProfileInputResult = { value: ProfileInput; error?: never } | { value?: never; error: string }
 
 function readProfileInput(formData: FormData): ProfileInputResult {
@@ -26,25 +26,8 @@ function readProfileInput(formData: FormData): ProfileInputResult {
   if (typeof fullNameValue !== 'string' || fullNameValue.trim().length > 80) {
     return { error: 'El nombre admite hasta 80 caracteres.' }
   }
-  const avatarValue = formData.get('avatar_url') ?? ''
-  if (typeof avatarValue !== 'string' || avatarValue.trim().length > 2048) {
-    return { error: 'La dirección del avatar admite hasta 2048 caracteres.' }
-  }
-  const avatarUrl = avatarValue.trim()
-  if (avatarUrl) {
-    try {
-      const url = new URL(avatarUrl)
-      if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) {
-        return { error: 'Usa una dirección HTTPS válida para el avatar, sin credenciales.' }
-      }
-    } catch {
-      return { error: 'Usa una dirección HTTPS válida para el avatar.' }
-    }
-  }
-
   const value: ProfileInput = {
     full_name: fullNameValue.trim() || null,
-    avatar_url: avatarUrl || null,
   }
   return { value }
 }

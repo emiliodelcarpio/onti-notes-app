@@ -210,7 +210,7 @@ export default function AccountMenu({ profile, email }: { profile: Profile; emai
         description="Personaliza tu nombre visible y tu imagen de perfil."
         busy={editorBusy}
       >
-        {editor === 'profile' && <ProfileForm profile={profile} email={email} onSaved={savedEditor} onCancel={closeEditor} onBusyChange={setEditorBusy} />}
+        {editor === 'profile' && <ProfileForm profile={profile} email={email} onCancel={closeEditor} onBusyChange={setEditorBusy} />}
       </Modal>
       <Modal
         open={editor === 'password'}

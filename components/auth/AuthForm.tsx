@@ -104,6 +104,7 @@ export default function AuthForm({ mode, action }: {
     lock.current = true
     setSubmitting(true)
     setSuccess(false)
+    let leaving = false
     try {
       const result = await action(data)
       if (!result.success) {
@@ -112,25 +113,29 @@ export default function AuthForm({ mode, action }: {
       }
       setValues(emptyValues)
       setTouched({})
-      if (mode === 'login' || mode === 'register') {
+      if (mode === 'login' || mode === 'register' || mode === 'update') {
         if (mode === 'login') {
           showToast('¡Bienvenido de nuevo!', 'Has iniciado sesión en tu espacio personal.')
-        } else {
+        } else if (mode === 'register') {
           showToast('Registro completado', 'Revisa tu correo para confirmar tu cuenta cuando sea necesario. Si ya tenías una cuenta, puedes iniciar sesión.')
+        } else {
+          showToast('Contraseña actualizada', 'Ya puedes iniciar sesión con tu nueva contraseña.')
         }
+        leaving = true
         startTransition(() => {
-          router.replace(mode === 'register' ? '/login?registered=1' : '/')
-          if (mode === 'login') router.refresh()
+          router.replace(mode === 'register' ? '/login?registered=1' : mode === 'update' ? '/login?password-updated=1' : '/')
+          if (mode !== 'register') router.refresh()
         })
       } else {
         setSuccess(true)
-        if (mode === 'update') router.refresh()
       }
     } catch {
       setError('No pudimos conectar. Revisa tu conexión e inténtalo de nuevo.')
     } finally {
-      lock.current = false
-      setSubmitting(false)
+      if (!leaving) {
+        lock.current = false
+        setSubmitting(false)
+      }
     }
   }
 
@@ -143,12 +148,10 @@ export default function AuthForm({ mode, action }: {
         {success && <FeedbackMessage
           icon="check-circle"
           tone="success"
-          title={mode === 'forgot' ? 'Solicitud completada' : 'Contraseña actualizada'}
+          title="Solicitud completada"
           className="mb-5"
         >
-          {mode === 'forgot'
-            ? 'Si existe una cuenta asociada y la solicitud puede procesarse, recibirás un enlace con las instrucciones. Revisa también la carpeta de spam.'
-            : 'Tu nueva contraseña se ha guardado. Ya puedes continuar a tu espacio.'}
+          Si existe una cuenta asociada y la solicitud puede procesarse, recibirás un enlace con las instrucciones. Revisa también la carpeta de spam.
         </FeedbackMessage>}
       </div>
       <fieldset disabled={pending} className="space-y-4">
@@ -216,7 +219,6 @@ export default function AuthForm({ mode, action }: {
         {mode !== 'login' && <Link href="/login" className={linkClass}><Icon name="login" className="size-4" />Iniciar sesión</Link>}
         {mode === 'login' && <Link href="/register" className={linkClass}><Icon name="user-plus" className="size-4" />Crear cuenta</Link>}
         {(mode === 'login' || mode === 'update') && <Link href="/forgot-password" className={linkClass}><Icon name="key" className="size-4" />Recuperar contraseña</Link>}
-        {mode === 'update' && success && <Link href="/" className={linkClass}><Icon name="arrow-right" className="size-4" />Continuar</Link>}
       </nav>
     </form>
   )

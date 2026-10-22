@@ -9,7 +9,7 @@
 
 Los registros y las solicitudes de recuperación muestran el mismo aviso tanto para direcciones nuevas como existentes y no exponen errores del proveedor. El aviso confirma la solicitud, no la entrega del correo; errores de rechazo o límites por dirección también mantienen una respuesta neutral. Usa los controles de frecuencia y protección contra abuso de Supabase.
 
-Usa únicamente direcciones autorizadas y la configuración de pruebas de Supabase Auth; el servicio predeterminado no garantiza envíos a cualquier destinatario. No configures SMTP productivo. El trigger de perfiles debe estar instalado desde `squema.sql`.
+Usa únicamente direcciones autorizadas y la configuración de pruebas de Supabase Auth; el servicio predeterminado no garantiza envíos a cualquier destinatario. No configures SMTP productivo. El trigger de perfiles debe estar instalado desde `schema.sql`.
 
 ## Diagnóstico de recuperación de contraseña
 
@@ -44,6 +44,8 @@ Los rechazos que pueden depender del destinatario conservan un aviso público ne
 
 La acción ahora envía `redirectTo` explícito a `/auth/confirm?type=recovery`. Allí se ejecuta `exchangeCodeForSession`, se guardan las cookies de sesión y se redirige a `/update-password`. El destino final no acepta parámetros `next` ni URLs externas.
 
+Al guardar la nueva contraseña en `/update-password`, la acción completa la recuperación cerrando la sesión de ese navegador y revalidando el layout. El formulario termina en `/login?password-updated=1`, donde se conserva una confirmación visible para iniciar sesión con la nueva contraseña. La navegación usa un destino fijo; el botón permanece bloqueado hasta abandonar el formulario. El cambio de contraseña desde el perfil conserva la sesión. Si falla el guardado, se muestra el error sin redirigir; si la contraseña se guardó pero no se pudo finalizar el cierre, el mensaje indica ese resultado parcial.
+
 Para este flujo PKCE, abre el correo en el mismo navegador y origen donde solicitaste la recuperación: la cookie del verificador es necesaria. `localhost` y `127.0.0.1` son hosts distintos. Cambiar de navegador o borrar sus cookies impide completar este intercambio.
 
 Si ya utilizas la plantilla personalizada con `token_hash`, sigue siendo compatible y verifica el token directamente, incluso desde otro navegador:
@@ -65,7 +67,7 @@ No se necesita configurar SMTP productivo para estas pruebas. Referencias: [rest
 - Registra un correo autorizado y comprueba que se redirige a `/login?registered=1`, donde aparece el aviso «¡Registro completado!» con las instrucciones para revisar el correo y confirmar la cuenta. El botón debe permanecer deshabilitado también durante la navegación. Repite con una cuenta existente: la redirección y el aviso deben ser idénticos. Abre `/login` directamente y comprueba que no muestra ese aviso. Ante errores de validación o de conexión, el formulario debe mostrar el error sin redirigir.
 - Abre la confirmación de correo y comprueba sesión y perfil automático.
 - Comprueba que credenciales incorrectas, cuentas inexistentes y cuentas sin confirmar muestran el mismo error al iniciar sesión.
-- Solicita recuperación con una cuenta autorizada, abre el enlace y guarda una nueva contraseña. Comprueba que puedes iniciar sesión con ella. Las solicitudes para cuentas inexistentes deben mostrar el mismo aviso.
+- Solicita recuperación con una cuenta autorizada, abre el enlace y guarda una nueva contraseña. Debe terminar en `/login?password-updated=1`, mostrar «Contraseña actualizada» y permitir iniciar sesión con ella. Comprueba que `/` sin volver a iniciar sesión regresa al login y que no hay envíos duplicados durante el guardado o la navegación. Ante validación incorrecta, enlace caducado o rechazo del guardado, debe conservarse el formulario con error. Las solicitudes para cuentas inexistentes deben mostrar el mismo aviso.
 - Comprueba enlaces caducados, incompletos y reutilizados: deben terminar en `/auth/error` sin detalles internos.
 - Cierra sesión y comprueba que `/` vuelve a `/login`. Abre `/update-password` sin sesión: guardar debe fallar de forma segura.
 - Comprueba fallos de conexión y errores del servidor. No incluyas tokens, contraseñas ni claves en capturas o registros.
@@ -76,15 +78,48 @@ Referencias: [Auth SSR](https://supabase.com/docs/guides/auth/server-side), [aut
 
 ## Dashboard, perfil y apariencia
 
-`squema.sql` documenta la estructura actual y sirve para una instalación nueva. `CREATE TABLE IF NOT EXISTS` no adapta una tabla existente: modificar el archivo local tampoco cambia Supabase. Para una instalación previa, revisa y ejecuta en SQL Editor, con un rol administrador, primero `migracion_profiles_created_at.sql` y después `migracion_profiles_theme.sql`. Ambas son idempotentes y no cambian RLS, permisos ni Storage; tampoco crean perfiles ausentes. La migración de fechas conserva los datos de `dated_at`, rellena fechas vacías con la creación de Auth o la fecha actual y reinstala el trigger de timestamps. Las fechas heredadas sin zona se interpretan como UTC: confirma que esa convención corresponde a tus datos antes de aplicarla.
+`schema.sql` documenta la estructura actual y sirve para una instalación nueva. `CREATE TABLE IF NOT EXISTS` no adapta una tabla existente: modificar el archivo local tampoco cambia Supabase. Para una instalación previa, revisa y ejecuta en SQL Editor, con un rol administrador, primero `migracion_profiles_created_at.sql` y después `migracion_profiles_theme.sql`. Ambas son idempotentes y no cambian RLS, permisos ni Storage; tampoco crean perfiles ausentes. La migración de fechas conserva los datos de `dated_at`, rellena fechas vacías con la creación de Auth o la fecha actual y reinstala el trigger de timestamps. Las fechas heredadas sin zona se interpretan como UTC: confirma que esa convención corresponde a tus datos antes de aplicarla. Para la subida de fotos, aplica además `migracion_avatars_storage.sql`, descrita abajo.
 
 La ruta `/` requiere sesión y muestra notas y recordatorios propios. Permite crear, editar y eliminar con confirmación, filtrar por tipo, estatus y prioridad, buscar y alternar entre tarjetas y columnas Kanban. Los recordatorios usan la zona horaria del navegador y guardan el instante en UTC; programarlos **no envía correos**. `profiles` no tiene una columna `timezone`.
 
+La vista de tarjetas muestra las 10 notas más recientes y añade bloques de hasta 10 automáticamente al acercarse al final de la lista. Kanban comienza con hasta 3 notas por estatus (hasta 21 entre las siete columnas), independientemente de qué estatus concentre las notas recientes. Cada columna tiene desplazamiento vertical y añade hasta 3 notas propias al llegar a su final; las columnas fuera de pantalla no solicitan bloques adicionales. Si hay un filtro de estatus, solo se consulta esa columna. No hay botón de carga; se mantiene un botón de reintento únicamente si falla una solicitud.
+
+La carga muestra un indicador, evita solicitudes repetidas y conserva las notas visibles si hay un error. Los contadores de las columnas representan únicamente las notas cargadas. La búsqueda y los filtros se aplican en el servidor sobre todas las notas propias, incluidas las que aún no se muestran; la búsqueda conserva la coincidencia sin distinguir mayúsculas ni acentos.
+
+La paginación usa `created_at` e `id` como cursor para mantener el orden cuando varias notas tienen la misma fecha. No descarga todas las notas ni solicita un recuento completo: consulta hasta 11 filas para devolver 10 en tarjetas y hasta 4 para devolver 3 por columna en Kanban, con cursores independientes. Al cambiar filtros o actualizar notas, la vista vuelve a sus bloques iniciales y conserva la vista y los filtros activos, evitando mezclar páginas anteriores con datos nuevos. No requiere cambios en la configuración ni en el esquema de Supabase.
+
 En Kanban, arrastra el control de seis puntos de una tarjeta hasta la columna de destino. Funciona con ratón, táctil y lápiz; el borde resalta el destino y el tablero se desplaza al acercarse a sus extremos. Con teclado, enfoca ese control, pulsa Espacio o Enter, elige columna con las flechas y confirma con Espacio o Enter; Escape o Tab cancelan. El selector de estatus también sigue disponible. Soltar fuera del tablero o en el mismo estatus no guarda cambios. Mientras se guarda, los controles de estatus quedan bloqueados; la tarjeta cambia de columna cuando el servidor confirma. Si falla, conserva su estatus y muestra un error. Los filtros permanecen activos, por lo que una tarjeta puede dejar de mostrarse al salir del estatus filtrado.
 
-El menú de cuenta permite editar el nombre visible (`full_name`) y el avatar HTTPS, cambiar contraseña, cerrar sesión y elegir claro, oscuro o sistema. La apariencia se guarda en `profiles.theme_preference` y en una cookie del servidor. Con sesión, el perfil es la fuente principal; la cookie conserva la selección en las vistas de acceso. El servidor establece el tema inicial en el HTML para evitar destellos del tema incorrecto. El valor inicial es `system`.
+El menú de cuenta permite editar el nombre visible (`full_name`) y subir la foto, cambiar contraseña, cerrar sesión y elegir claro, oscuro o sistema. Dentro de la edición del perfil, la foto tiene su propia selección, vista previa y guardado, independientes del nombre. La apariencia se guarda en `profiles.theme_preference` y en una cookie del servidor. Con sesión, el perfil es la fuente principal; la cookie conserva la selección en las vistas de acceso. El servidor establece el tema inicial en el HTML para evitar destellos del tema incorrecto. El valor inicial es `system`.
 
 Los campos oficiales son `id`, `username`, `full_name`, `avatar_url`, `email`, `created_at`, `updated_at` y `theme_preference`. No se consultan ni escriben `display_name`, `timezone` ni `dated_at`. El correo visible y la identidad proceden de Supabase Auth; `profiles.email` es una copia heredada que no se sincroniza automáticamente y `username` no se utiliza para iniciar sesión. Las fechas las mantiene la base de datos.
+
+## Configurar la subida de fotos en Supabase
+
+Para un proyecto existente, abre `migracion_avatars_storage.sql`, revísalo y ejecútalo completo en **SQL Editor** con un rol administrador. No basta con modificar el archivo local. La migración es idempotente, no borra ni mueve archivos y no cambia las políticas heredadas de `profiles` ni las de `notes`. Una instalación nueva incorpora el mismo bloque en `schema.sql`.
+
+El bucket `avatars` debe ser **privado**, con `file_size_limit = 2097152` (2 MiB) y `allowed_mime_types = {image/jpeg,image/png,image/webp}`. La aplicación valida también el archivo en el servidor, genera una ruta `<identificador del usuario>/<UUID>.jpg|png|webp` y sube sin sobrescribir objetos. `profiles.avatar_url` conserva su tipo `text`: para las fotos nuevas guarda la ruta del objeto, nunca una URL firmada ni su token. El servidor genera una URL de lectura de una hora al cargar el perfil. Recargar la aplicación renueva esa URL.
+
+Solo un usuario autenticado puede subir, leer, firmar o borrar objetos cuya primera carpeta y `owner_id` correspondan a su propia sesión. Supabase asigna `owner_id` a partir del JWT al subir mediante su API; los archivos creados desde Dashboard o con credenciales administrativas pueden carecer de propietario. Se sustituye únicamente a las tres políticas amplias heredadas con nombres conocidos. Cuatro políticas `RESTRICTIVE` protegen `avatars` aunque existan otras políticas generales permisivas; en otros buckets no añaden ni retiran acceso. `UPDATE` queda bloqueado para avatares: cada cambio genera un archivo nuevo. Consulta la documentación de [propiedad de objetos](https://supabase.com/docs/guides/storage/security/ownership) y [control de acceso](https://supabase.com/docs/guides/storage/security/access-control).
+
+Al final de la migración se ejecutan estas consultas de comprobación, que también puedes repetir sin modificar datos:
+
+```sql
+SELECT id, name, public, file_size_limit, allowed_mime_types
+FROM storage.buckets
+WHERE id = 'avatars';
+
+SELECT policyname, permissive, roles, cmd, qual, with_check
+FROM pg_catalog.pg_policies
+WHERE schemaname = 'storage' AND tablename = 'objects'
+ORDER BY policyname;
+```
+
+Verifica que `public` sea `false` y aparezcan `avatars_select_own`, `avatars_insert_own`, `avatars_delete_own` y las cuatro `avatars_*_guard`. Revisa todas las demás políticas, incluidas las generales: no se eliminan automáticamente. Si la migración falla al comprobar RLS o por permisos sobre `storage`, detén la configuración y revisa el estado de Storage con un administrador; no deshabilites RLS ni conviertas el bucket en público para resolver un error.
+
+Las direcciones HTTPS heredadas siguen mostrándose hasta cambiar la foto. Los archivos antiguos de este bucket que dependían de lectura pública, están fuera de la carpeta del usuario o no tienen `owner_id` propio pueden dejar de estar disponibles al restringir el acceso: vuelve a subir la imagen desde la edición del perfil. No se descargan, trasladan ni borran automáticamente esos archivos.
+
+Prueba con dos cuentas autorizadas, usando sus credenciales normales: cada una debe poder guardar su foto, recargar y verla, pero no leer, firmar, sobrescribir ni borrar objetos de la otra. Prueba también JPEG/PNG/WebP válidos, un archivo superior a 2 MiB, un formato no permitido, fallos de red y el guardado independiente del nombre. La validación administrativa del SQL Editor no demuestra aislamiento con RLS. Si falla la subida, revisa el bucket, sus límites, la sesión y las políticas; si falla solo el guardado, comprueba que exista la fila del perfil y su política `UPDATE` propia. Comparte únicamente códigos y estados de error, sin rutas, identificadores ni URLs firmadas.
 
 ## Si persiste el error al cargar preferencias
 
@@ -137,6 +172,7 @@ Comprobaciones manuales pendientes en el proyecto Supabase:
 - Verifica que el registro crea un perfil y revisa por separado las cuentas anteriores. Edita el perfil y recarga: deben conservarse `full_name`, avatar y apariencia; `created_at` debe permanecer estable y `updated_at` cambiar tras la edición.
 - Prueba los tres temas, la recarga y el cierre e inicio de sesión. En sistema, cambia la apariencia del dispositivo; en los temas manuales debe conservarse la elección.
 - Crea y edita notas con los cinco colores, prioridades y estatus. Comprueba filtros, búsqueda, tarjetas y Kanban; cancela una eliminación y confirma otra. Revisa los estados vacío, carga y error.
+- Con 25 notas, desplázate hasta el final para comprobar la carga automática de 10, 20 y 25 sin duplicados ni botón de carga. En Kanban, usa una distribución desigual entre estatus: cada columna debe recibir 3 notas iniciales o todas las disponibles si tiene menos, y cargar sus siguientes bloques al desplazarse dentro de ella. Busca una nota fuera del primer bloque, prueba filtros combinados y cambios rápidos de vista/búsqueda. Con conexión lenta o un fallo de carga adicional, las notas visibles deben conservarse; no debe haber un bucle de reintentos automáticos y el reintento manual debe continuar desde el mismo punto. Después de editar, eliminar o cambiar estatus, comprueba los bloques iniciales actualizados.
 - En Kanban, mueve notas y recordatorios a columnas vacías y ocupadas, también hasta Archivado usando el desplazamiento del tablero. Recarga para comprobar persistencia. Prueba ratón, táctil, teclado, Escape, soltar fuera y mismo estatus; esos casos de cancelación no deben guardar. Con conexión lenta, comprueba el bloqueo de envíos repetidos; con un fallo del servidor, verifica que la tarjeta conserva el estatus. Repite con filtros activos y ambos temas.
 - Programa y reprograma un recordatorio futuro desde un navegador con una zona horaria distinta de UTC. Comprueba la hora mostrada, su instante UTC en Supabase y la validación de fechas pasadas. No esperes un correo.
 - Con dos cuentas autorizadas, comprueba que cada una solo ve y modifica sus propias notas y solo puede editar su propio perfil. Repite consultas y modificaciones con las credenciales normales de cada cuenta para verificar RLS; una sesión administradora del SQL Editor no sirve para demostrar el aislamiento. La política heredada de perfiles permite lectura pública, por lo que esta comprobación no debe afirmar privacidad del perfil.
@@ -153,6 +189,6 @@ El modo claro utiliza fondo frío, tarjetas blancas con sombra suave, iconos ín
 - Los campos muestran errores al salir de ellos o intentar enviar. El primer campo inválido recibe el foco; el botón permanece deshabilitado mientras haya errores visibles o una operación pendiente. La validación del servidor se mantiene.
 - Los campos de contraseña permiten mostrar u ocultar el valor y el campo de nueva contraseña ofrece una orientación de longitud y variedad. La barra es informativa: no cambia el mínimo de 8 caracteres ni garantiza seguridad.
 - Los éxitos de inicio de sesión y registro usan un toast que permanece durante la navegación, se cierra manualmente o a los 8 segundos y pausa su cierre al pasar el cursor o recibir foco. El registro conserva además las instrucciones de verificación visibles en el login.
-- Los errores del servidor y los avisos de recuperación o contraseña actualizada permanecen en el formulario. Los mensajes de correo conservan su neutralidad y no garantizan entrega.
+- Los errores del servidor y el aviso de solicitud de recuperación permanecen en el formulario. La confirmación de contraseña actualizada aparece en el login después de completar la recuperación. Los mensajes de correo conservan su neutralidad y no garantizan entrega.
 
 Para revisar el diseño, comprueba los cuatro formularios vacíos, con datos, con errores, cargando y con respuesta de éxito; verifica teclado, botones de visibilidad, cierre del toast, preferencia de movimiento reducido y adaptación a pantallas estrechas. No uses solicitudes reales repetidas para probar la apariencia de los estados de envío.

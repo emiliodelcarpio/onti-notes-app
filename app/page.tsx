@@ -6,7 +6,8 @@ import NotesWorkspace from '@/components/notes/NotesWorkspace'
 import FeedbackMessage from '@/components/ui/FeedbackMessage'
 import Icon from '@/components/ui/Icon'
 import { getAccountData } from '@/lib/account'
-import type { Note } from '@/types/notes'
+import { getNotesPage } from '@/lib/notes'
+import type { NotesPage } from '@/types/notes'
 import type { Profile } from '@/types/profile'
 
 export default async function Home({ searchParams }: {
@@ -34,22 +35,11 @@ export default async function Home({ searchParams }: {
     : account.profileError === 'invalid_theme'
       ? 'No pudimos recuperar tu apariencia guardada. Vuelve a elegirla en el menú de cuenta.'
       : 'No pudimos cargar tu perfil. Algunas preferencias pueden mostrarse con sus valores iniciales.'
-  const notes: Note[] = []
+  let initialPage: NotesPage = { notes: [], nextCursor: null }
   let loadError: string | undefined
   try {
-    // Read all pages rather than silently truncating at the API's default row limit.
-    const pageSize = 1000
-    for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await supabase.from('notes')
-        .select('id, user_id, title, content, type, priority, status, color, remind_at, created_at, updated_at')
-        .eq('user_id', user.id).order('created_at', { ascending: false }).order('id', { ascending: false })
-        .range(offset, offset + pageSize - 1)
-      if (error || !data) throw new Error('notes_unavailable')
-      notes.push(...data)
-      if (data.length < pageSize) break
-    }
+    initialPage = await getNotesPage(supabase, user.id, { type: 'all', status: 'all', priority: 'all', query: '' })
   } catch {
-    notes.length = 0
     loadError = 'Revisa tu conexión y vuelve a intentarlo. Tus notas guardadas no se han modificado.'
   }
 
@@ -70,7 +60,7 @@ export default async function Home({ searchParams }: {
         <FeedbackMessage tone="error" icon="alert-circle" className="flex-1">{profileErrorMessage}</FeedbackMessage>
         <RetryButton />
       </div>}
-      <NotesWorkspace notes={notes} loadError={loadError} />
+      <NotesWorkspace initialPage={initialPage} loadError={loadError} />
     </div>
   </main>
 }
